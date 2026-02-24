@@ -4,6 +4,8 @@
  * CORS (Cross-Origin Resource Sharing) controls which websites
  * can make requests to our API.
  * 
+ * In development, we allow cerrtain origins for convenience like from LiveServer.
+ * 
  * In production, this should only allow requests from our frontend domain.
  */
 
@@ -12,25 +14,34 @@ import { FastifyInstance } from 'fastify';
 
 export async function registerCors(app: FastifyInstance): Promise<void> {
   const isDevelopment = process.env.NODE_ENV !== 'production';
-  const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://localhost:5500';
   
+  // Development origins — hardcoded, never need to change
+  const devOrigins = [
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+  ];
+
+  // Production origin — set this in Render environment variables
+  // Example: https://nomada-tickets-frontend-test.pages.dev
+  const productionOrigin = process.env.FRONTEND_ORIGIN || '';
+
+  const allowedOrigins = [...devOrigins, productionOrigin].filter(Boolean);
+
   await app.register(cors, {
-    // In development, allow all origins for easier testing
-    // In production, only allow the configured frontend origin
-    origin: isDevelopment ? true : frontendOrigin,
-    
-    // Allow these HTTP methods
+    origin: isDevelopment ? true : (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'), false);
+      }
+    },
     methods: ['GET', 'POST', 'OPTIONS'],
-    
-    // Allow these headers in requests
     allowedHeaders: ['Content-Type', 'Authorization'],
-    
-    // Allow credentials (cookies, authorization headers)
     credentials: true,
-    
-    // Cache preflight requests for 24 hours
     maxAge: 86400
   });
-  
-  console.log(`[CORS] Configured for ${isDevelopment ? 'development (all origins)' : `production (${frontendOrigin})`}`);
+
+  console.log(`[CORS] Configured for ${isDevelopment ? 'development (all origins)' : `production (${allowedOrigins.join(', ')})`}`);
 }
