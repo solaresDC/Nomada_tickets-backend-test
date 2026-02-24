@@ -31,5 +31,19 @@ Content-Type: application/json
   "language": "en"
 }
 
-### Get QR code (will be pending until webhook fires)
+### Get QR code "pending"(will be pending until webhook fires)
 GET http://localhost:3000/api/orders/pi_test_placeholder/qr
+
+### Get QR code "ready, etc..." (after webhook fires, requires to provide !!SUCCEEDED!! PaymentIntent ID)
+GET http://localhost:3000/api/orders/pi_3SqjGPGV3cwb7LAj3Vu2EDWv/qr
+
+
+### test render
+POST https://nomada-tickets-com-test.onrender.com/api/checkout/create-intent 
+Content-Type: application/json 
+
+{
+"femaleQty": 1, 
+"maleQty": 1, 
+"language": "en"
+}
