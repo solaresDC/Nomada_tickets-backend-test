@@ -18,7 +18,7 @@ export async function registerCors(app: FastifyInstance): Promise<void> {
   // Development origins — hardcoded, never need to change
   const devOrigins = [
     'http://localhost:5500',
-    'http://127.0.0.1:5500',
+    'http://127.0.0.1:5000',
   ];
 
   // Production origin — set this in Render environment variables
