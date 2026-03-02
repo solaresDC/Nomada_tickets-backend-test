@@ -11,7 +11,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { verifyWebhookSignature } from '../plugins/stripe.js';
-import { orderStore } from '../services/inMemoryOrderStore.js';
+import { orderStore } from '../services/supabaseOrderStore.js';
 import { generateQRToken } from '../services/qrService.js';
 import Stripe from 'stripe';
 
