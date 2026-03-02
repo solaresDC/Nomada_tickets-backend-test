@@ -1,12 +1,39 @@
+# ==============================================================================
+# SUPABASE DATABASE BACKUP - Daily Backup with Retry System
+# ==============================================================================
+#
+# WHAT THIS DOES:
+#   - Runs automatically every day at midnight UTC
+#   - Uses Supabase CLI (handles PostgreSQL version automatically)
+#   - Retries up to 3 times if it fails (with increasing wait times)
+#   - Logs which attempt number it's on
+#   - Creates a GitHub Issue to notify you if ALL retries fail
+#   - Saves the backup as a downloadable artifact for 90 days
+#
+# HOW TO DOWNLOAD YOUR BACKUP:
+#   1. Go to your repo on GitHub
+#   2. Click "Actions" tab
+#   3. Click the latest "Supabase Database Backup" run
+#   4. Click "Summary" in the left sidebar
+#   5. Scroll down to "Artifacts" and click to download
+#
+# ==============================================================================
+
 name: Supabase Database Backup
 
 on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual backup'
+        required: false
+        default: 'Manual backup triggered'
 
 permissions:
   contents: read
+  issues: write
   actions: write
 
 jobs:
@@ -14,28 +41,183 @@ jobs:
     name: Backup Supabase Database
     runs-on: ubuntu-latest
 
+    env:
+      MAX_RETRIES: 3
+      BACKUP_DIR: ./backups
+
     steps:
+      # -------------------------------------------------------
+      # STEP 1: Check out the repository
+      # -------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -------------------------------------------------------
+      # STEP 2: Install Supabase CLI
+      # Handles ALL PostgreSQL version complexity automatically
+      # No manual version updates ever needed
+      # -------------------------------------------------------
       - name: Install Supabase CLI
         run: |
+          echo "📦 Installing Supabase CLI..."
           curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz | tar -xz
           sudo mv supabase /usr/local/bin/supabase
-          supabase --version
+          echo "✅ Supabase CLI installed: $(supabase --version)"
 
-      - name: Create backup
+      # -------------------------------------------------------
+      # STEP 3: Create backup directory
+      # -------------------------------------------------------
+      - name: Create backup directory
         run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S_UTC")
-          mkdir -p backups
-          supabase db dump \
-            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
-            -f backups/nomada_backup_${TIMESTAMP}.sql
-          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
+          mkdir -p ${{ env.BACKUP_DIR }}
+          echo "📁 Backup directory ready"
 
+      # -------------------------------------------------------
+      # STEP 4: Run backup with retry system
+      # -------------------------------------------------------
+      - name: Backup database with retry system
+        id: backup
+        run: |
+          #!/bin/bash
+          set -euo pipefail
+
+          MAX_RETRIES=${{ env.MAX_RETRIES }}
+          TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S_UTC")
+          BACKUP_FILE="${{ env.BACKUP_DIR }}/nomada_backup_${TIMESTAMP}.sql"
+
+          echo "=============================================="
+          echo "🗄️  SUPABASE DATABASE BACKUP"
+          echo "=============================================="
+          echo "📅 Timestamp: ${TIMESTAMP}"
+          echo "📂 Backup file: ${BACKUP_FILE}"
+          echo "🔄 Max retries: ${MAX_RETRIES}"
+          echo "=============================================="
+
+          ATTEMPT=0
+          BACKUP_SUCCESS=false
+
+          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+
+            echo ""
+            echo "----------------------------------------------"
+            echo "🔄 ATTEMPT ${ATTEMPT} of ${MAX_RETRIES}"
+            echo "----------------------------------------------"
+            echo "⏰ Started at: $(date -u +"%H:%M:%S UTC")"
+
+            if supabase db dump \
+              --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+              -f "${BACKUP_FILE}" \
+              2>&1; then
+
+              if [ -f "${BACKUP_FILE}" ] && [ -s "${BACKUP_FILE}" ]; then
+                FILE_SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
+                LINE_COUNT=$(wc -l < "${BACKUP_FILE}")
+
+                echo ""
+                echo "✅ BACKUP SUCCESSFUL on attempt ${ATTEMPT} of ${MAX_RETRIES}!"
+                echo "📊 File size: ${FILE_SIZE}"
+                echo "📝 Line count: ${LINE_COUNT}"
+                echo "⏰ Completed at: $(date -u +"%H:%M:%S UTC")"
+
+                BACKUP_SUCCESS=true
+                break
+              else
+                echo "⚠️  Attempt ${ATTEMPT} of ${MAX_RETRIES}: Backup file is empty or missing"
+              fi
+            else
+              echo "❌ Attempt ${ATTEMPT} of ${MAX_RETRIES}: supabase db dump failed"
+            fi
+
+            if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+              WAIT_TIME=$((ATTEMPT * 30))
+              echo "⏳ Waiting ${WAIT_TIME} seconds before retry..."
+              sleep $WAIT_TIME
+            fi
+          done
+
+          echo "backup_success=${BACKUP_SUCCESS}" >> $GITHUB_OUTPUT
+          echo "backup_file=${BACKUP_FILE}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "attempts=${ATTEMPT}" >> $GITHUB_OUTPUT
+
+          if [ "${BACKUP_SUCCESS}" = false ]; then
+            echo ""
+            echo "=============================================="
+            echo "🚨 ALL ${MAX_RETRIES} RETRIES EXHAUSTED — BACKUP FAILED"
+            echo "=============================================="
+          fi
+
+      # -------------------------------------------------------
+      # STEP 5: Upload backup artifact (if successful)
+      # -------------------------------------------------------
       - name: Upload backup artifact
+        if: steps.backup.outputs.backup_success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-backup-${{ env.TIMESTAMP }}
-          path: backups/
+          name: supabase-backup-${{ steps.backup.outputs.timestamp }}
+          path: ${{ steps.backup.outputs.backup_file }}
           retention-days: 90
+          compression-level: 9
+
+      # -------------------------------------------------------
+      # STEP 6: Success summary
+      # -------------------------------------------------------
+      - name: Success summary
+        if: steps.backup.outputs.backup_success == 'true'
+        run: |
+          echo ""
+          echo "=============================================="
+          echo "🎉 BACKUP COMPLETED SUCCESSFULLY"
+          echo "=============================================="
+          echo "📅 Timestamp: ${{ steps.backup.outputs.timestamp }}"
+          echo "🔄 Attempts needed: ${{ steps.backup.outputs.attempts }} of ${{ env.MAX_RETRIES }}"
+          echo "📦 Retained for: 90 days"
+          echo "=============================================="
+
+      # -------------------------------------------------------
+      # STEP 7: Create GitHub Issue if ALL retries failed
+      # -------------------------------------------------------
+      - name: Notify failure via GitHub Issue
+        if: steps.backup.outputs.backup_success == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const timestamp = '${{ steps.backup.outputs.timestamp }}';
+            const attempts = '${{ steps.backup.outputs.attempts }}';
+            const maxRetries = '${{ env.MAX_RETRIES }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Database Backup Failed — ${timestamp}`,
+              body: `## Database Backup Failure Report\n\n` +
+                    `**Date:** ${timestamp}\n` +
+                    `**Attempts:** ${attempts} of ${maxRetries}\n` +
+                    `**Status:** ❌ All retries exhausted\n\n` +
+                    `### What happened\n` +
+                    `The automated Supabase database backup failed after ${maxRetries} attempts.\n\n` +
+                    `### What to check\n` +
+                    `1. **SUPABASE_DB_URL** secret — Is the connection string still correct?\n` +
+                    `2. **Database password** — Has it been changed or rotated?\n` +
+                    `3. **Supabase project status** — Is the project paused or suspended?\n` +
+                    `4. **Network** — GitHub Actions might have had a temporary outage\n\n` +
+                    `### Action needed\n` +
+                    `- Check the [workflow run logs](${runUrl}) for detailed error messages\n` +
+                    `- Fix the issue and run the backup manually from the Actions tab\n\n` +
+                    `---\n` +
+                    `*This issue was automatically created by the backup workflow.*`,
+              labels: ['backup-failure', 'urgent']
+            });
+
+            console.log('📬 GitHub Issue created to notify about backup failure');
+
+      # -------------------------------------------------------
+      # STEP 8: Fail the workflow if backup failed
+      # -------------------------------------------------------
+      - name: Final status check
+        if: steps.backup.outputs.backup_success == 'false'
+        run: |
+          echo "❌ Backup failed after all retries. GitHub Issue has been created."
+          exit 1
