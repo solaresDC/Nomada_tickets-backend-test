@@ -5,6 +5,7 @@
 # WHAT THIS DOES:
 #   - Runs automatically every day at midnight UTC
 #   - Uses Supabase CLI (handles PostgreSQL version automatically)
+#   - Backs up both schema AND customer data
 #   - Retries up to 3 times if it fails (with increasing wait times)
 #   - Logs which attempt number it's on
 #   - Creates a GitHub Issue to notify you if ALL retries fail
@@ -83,13 +84,15 @@ jobs:
 
           MAX_RETRIES=${{ env.MAX_RETRIES }}
           TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S_UTC")
-          BACKUP_FILE="${{ env.BACKUP_DIR }}/nomada_backup_${TIMESTAMP}.sql"
+          SCHEMA_FILE="${{ env.BACKUP_DIR }}/nomada_schema_${TIMESTAMP}.sql"
+          DATA_FILE="${{ env.BACKUP_DIR }}/nomada_data_${TIMESTAMP}.sql"
 
           echo "=============================================="
           echo "🗄️  SUPABASE DATABASE BACKUP"
           echo "=============================================="
           echo "📅 Timestamp: ${TIMESTAMP}"
-          echo "📂 Backup file: ${BACKUP_FILE}"
+          echo "📂 Schema file: ${SCHEMA_FILE}"
+          echo "📂 Data file: ${DATA_FILE}"
           echo "🔄 Max retries: ${MAX_RETRIES}"
           echo "=============================================="
 
@@ -105,35 +108,51 @@ jobs:
             echo "----------------------------------------------"
             echo "⏰ Started at: $(date -u +"%H:%M:%S UTC")"
 
-
+            echo "📋 Dumping schema..."
             if supabase db dump \
               --db-url "${{ secrets.SUPABASE_DB_URL }}" \
-              --use-copy \
-              -f "${BACKUP_FILE}" && \
-              supabase db dump \
+              -f "${SCHEMA_FILE}" 2>&1; then
+              echo "✅ Schema dump successful"
+            else
+              echo "❌ Attempt ${ATTEMPT} of ${MAX_RETRIES}: Schema dump failed"
+              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+                WAIT_TIME=$((ATTEMPT * 30))
+                echo "⏳ Waiting ${WAIT_TIME} seconds before retry..."
+                sleep $WAIT_TIME
+              fi
+              continue
+            fi
+
+            echo "📦 Dumping customer data..."
+            if supabase db dump \
               --db-url "${{ secrets.SUPABASE_DB_URL }}" \
               --data-only \
-              --use-copy \
-              -f "${BACKUP_FILE}" \
-              2>&1; then
-
-              if [ -f "${BACKUP_FILE}" ] && [ -s "${BACKUP_FILE}" ]; then
-                FILE_SIZE=$(du -h "${BACKUP_FILE}" | cut -f1)
-                LINE_COUNT=$(wc -l < "${BACKUP_FILE}")
-
-                echo ""
-                echo "✅ BACKUP SUCCESSFUL on attempt ${ATTEMPT} of ${MAX_RETRIES}!"
-                echo "📊 File size: ${FILE_SIZE}"
-                echo "📝 Line count: ${LINE_COUNT}"
-                echo "⏰ Completed at: $(date -u +"%H:%M:%S UTC")"
-
-                BACKUP_SUCCESS=true
-                break
-              else
-                echo "⚠️  Attempt ${ATTEMPT} of ${MAX_RETRIES}: Backup file is empty or missing"
-              fi
+              -f "${DATA_FILE}" 2>&1; then
+              echo "✅ Data dump successful"
             else
-              echo "❌ Attempt ${ATTEMPT} of ${MAX_RETRIES}: supabase db dump failed"
+              echo "❌ Attempt ${ATTEMPT} of ${MAX_RETRIES}: Data dump failed"
+              if [ $ATTEMPT -lt $MAX_RETRIES ]; then
+                WAIT_TIME=$((ATTEMPT * 30))
+                echo "⏳ Waiting ${WAIT_TIME} seconds before retry..."
+                sleep $WAIT_TIME
+              fi
+              continue
+            fi
+
+            if [ -f "${SCHEMA_FILE}" ] && [ -s "${SCHEMA_FILE}" ] && [ -f "${DATA_FILE}" ]; then
+              SCHEMA_SIZE=$(du -h "${SCHEMA_FILE}" | cut -f1)
+              DATA_SIZE=$(du -h "${DATA_FILE}" | cut -f1)
+
+              echo ""
+              echo "✅ BACKUP SUCCESSFUL on attempt ${ATTEMPT} of ${MAX_RETRIES}!"
+              echo "📊 Schema file size: ${SCHEMA_SIZE}"
+              echo "📊 Data file size: ${DATA_SIZE}"
+              echo "⏰ Completed at: $(date -u +"%H:%M:%S UTC")"
+
+              BACKUP_SUCCESS=true
+              break
+            else
+              echo "⚠️  Attempt ${ATTEMPT} of ${MAX_RETRIES}: Backup files missing or empty"
             fi
 
             if [ $ATTEMPT -lt $MAX_RETRIES ]; then
@@ -144,7 +163,6 @@ jobs:
           done
 
           echo "backup_success=${BACKUP_SUCCESS}" >> $GITHUB_OUTPUT
-          echo "backup_file=${BACKUP_FILE}" >> $GITHUB_OUTPUT
           echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
           echo "attempts=${ATTEMPT}" >> $GITHUB_OUTPUT
 
@@ -156,14 +174,14 @@ jobs:
           fi
 
       # -------------------------------------------------------
-      # STEP 5: Upload backup artifact (if successful)
+      # STEP 5: Upload both files as one artifact (if successful)
       # -------------------------------------------------------
       - name: Upload backup artifact
         if: steps.backup.outputs.backup_success == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: supabase-backup-${{ steps.backup.outputs.timestamp }}
-          path: ${{ steps.backup.outputs.backup_file }}
+          path: ${{ env.BACKUP_DIR }}
           retention-days: 90
           compression-level: 9
 
@@ -180,6 +198,9 @@ jobs:
           echo "📅 Timestamp: ${{ steps.backup.outputs.timestamp }}"
           echo "🔄 Attempts needed: ${{ steps.backup.outputs.attempts }} of ${{ env.MAX_RETRIES }}"
           echo "📦 Retained for: 90 days"
+          echo "📋 Two files in artifact:"
+          echo "   - nomada_schema_... → table structure"
+          echo "   - nomada_data_...   → customer data"
           echo "=============================================="
 
       # -------------------------------------------------------
