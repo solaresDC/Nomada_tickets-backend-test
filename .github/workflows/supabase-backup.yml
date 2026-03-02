@@ -69,8 +69,12 @@ jobs:
         run: |
           echo "📦 Installing PostgreSQL client tools..."
           sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client
-          echo "✅ PostgreSQL client installed successfully"
+          sudo apt-get install -y -qq gnupg curl
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "✅ PostgreSQL 17 client installed successfully"
           pg_dump --version
 
       # -------------------------------------------------------
