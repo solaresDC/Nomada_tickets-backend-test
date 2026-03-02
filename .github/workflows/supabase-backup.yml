@@ -30,9 +30,8 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S_UTC")
           mkdir -p backups
           supabase db dump \
-            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} \
-            --db-url "${{ secrets.SUPABASE_DB_URL }}" \
-            -f backups/nomada_backup_${TIMESTAMP}.sql
+          --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+          -f backups/nomada_backup_${TIMESTAMP}.sql
           echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_ENV
 
       - name: Upload backup artifact
