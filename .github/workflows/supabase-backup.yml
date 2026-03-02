@@ -122,7 +122,7 @@ jobs:
             echo "⏰ Started at: $(date -u +"%H:%M:%S UTC")"
 
             # Try the backup
-            if pg_dump \
+            if /usr/lib/postgresql/17/bin/pg_dump \
               "${SUPABASE_DB_URL}" \
               --format=plain \
               --no-owner \
