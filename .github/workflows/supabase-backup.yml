@@ -105,8 +105,15 @@ jobs:
             echo "----------------------------------------------"
             echo "⏰ Started at: $(date -u +"%H:%M:%S UTC")"
 
+
             if supabase db dump \
               --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+              --use-copy \
+              -f "${BACKUP_FILE}" && \
+              supabase db dump \
+              --db-url "${{ secrets.SUPABASE_DB_URL }}" \
+              --data-only \
+              --use-copy \
               -f "${BACKUP_FILE}" \
               2>&1; then
 
