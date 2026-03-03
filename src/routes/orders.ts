@@ -7,7 +7,7 @@
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { orderStore } from '../services/inMemoryOrderStore.js';
+import { orderStore } from '../services/supabaseOrderStore.js';
 import { generateQRCodeDataUrl } from '../services/qrService.js';
 
 // Type for route parameters
