@@ -1,13 +1,59 @@
-### Health Check
+# =============================================================
+# NOMADA TICKETS — API TEST FILE
+# =============================================================
+#
+# BEFORE YOU START — READ THIS ONCE
+# ──────────────────────────────────
+# This file tests your entire backend from health check to door scan.
+# Each step produces a value you paste into the next step.
+#
+# THE VALUE CHAIN:
+#   Step 3 (terminal) → gives you a paymentIntentId (pi_...)
+#   Step 5 (GET tickets) → gives you a qrToken
+#   Step 6 (auth) → gives you a bearer token
+#   Steps 7, 8, 9, 10 → use bearer token + qrToken
+#
+# HOW TO RUN A TEST:
+#   Click "Send Request" that appears above any line starting with ###
+#
+# REQUIREMENT:
+#   VS Code extension "REST Client" must be installed
+#   (search "REST Client" by Huachao Mao in the Extensions panel)
+#
+# =============================================================
+
+
+
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 1 — HEALTH CHECK                                  │
+# │  Purpose: confirm the server is running before anything │
+# │  Expected response: { "status": "ok" }                  │
+# │  If you get an error: run  npm run dev  in terminal 1   │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 1 — Health Check
 GET http://localhost:3000/health
 
 
 
 
-###----------------------------------------------------------------------------------------------------------------------------
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 2 — CREATE A PAYMENT INTENT                       │
+# │  Purpose: simulate a buyer choosing tickets             │
+# │                                                         │
+# │  ⚠️  NOTE: The paymentIntentId you get here is NOT used │
+# │  in steps 4/5. Steps 4/5 use the ID from the TERMINAL   │
+# │  after you run stripe trigger in Step 3.                │
+# │  (They are two separate IDs — see reference guide)      │
+# │                                                         │
+# │  Expected response:                                     │
+# │    { clientSecret, paymentIntentId, pricing }           │
+# └─────────────────────────────────────────────────────────┘
 
-
-### Create PaymentIntent - Valid request
+### Step 2a — Create Payment Intent (valid: 2 female + 1 male)
+# 📋 PLACEHOLDER — update after each run:
+# Last paymentIntentId: pi_3T7KTZGV3cwb7LAj1eZmrjTq
 POST http://localhost:3000/api/checkout/create-intent
 Content-Type: application/json
 
@@ -17,10 +63,9 @@ Content-Type: application/json
   "language": "en"
 }
 
+###
 
-###----------------------------------------------------------------------------------------------------------------------------
-
-### Create PaymentIntent - Both zero (should fail)
+### Step 2b — Should FAIL: both quantities are zero (expect 400 error)
 POST http://localhost:3000/api/checkout/create-intent
 Content-Type: application/json
 
@@ -29,11 +74,10 @@ Content-Type: application/json
   "maleQty": 0,
   "language": "en"
 }
-###----------------------------------------------------------------------------------------------------------------------------
 
+###
 
-
-### Create PaymentIntent - Negative (should fail)
+### Step 2c — Should FAIL: negative quantity (expect 400 error)
 POST http://localhost:3000/api/checkout/create-intent
 Content-Type: application/json
 
@@ -42,117 +86,334 @@ Content-Type: application/json
   "maleQty": 1,
   "language": "en"
 }
-###----------------------------------------------------------------------------------------------------------------------------
 
 
 
 
-
-################################
-### QR PROCESSING TESTS (requires valid PaymentIntent ID from above)
-################################
-
-### Get QR code "pending"(will be pending until webhook fires)
-GET http://localhost:3000/api/orders/pi_test_placeholder/qr
-###----------------------------------------------------------------------------------------------------------------------------
-
-
-### Get QR code "ready, etc..." (after webhook fires, requires to provide !!SUCCEEDED!! PaymentIntent ID)
-GET http://localhost:3000/api/orders/pi_3T7Jj4GV3cwb7LAj0DqWZp1G/qr
-## GET http://localhost:3000/api/orders/[paymentIntentId_HERE]/qr
-###----------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-################################
-### test render hosted backend
-################################
-
-### test render
-POST https://nomada-tickets-com-test.onrender.com/api/checkout/create-intent 
-Content-Type: application/json 
-
-{
-"femaleQty": 1, 
-"maleQty": 1, 
-"language": "en"
-}
-###----------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-################################
-### Scanner Auth Tests 
-################################
-
-###----------------------------------------------------------------------------------------------------------------------------
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 3 — FIRE THE WEBHOOK  ← TERMINAL COMMAND          │
+# │  Purpose: simulate a completed payment                  │
+# │                                                         │
+# │  This cannot be done from this file.                    │
+# │  Run these commands in your terminals:                  │
+# │                                                         │
+# │  TERMINAL 1 (already running):                          │
+# │    npm run dev                                          │
+# │                                                         │
+# │  TERMINAL 2 — start Stripe listener:                    │
+# │    stripe listen --forward-to localhost:3000/api/webhooks/stripe
+# │    → Copy the  whsec_...  value into your .env file     │
+# │      as STRIPE_WEBHOOK_SECRET                           │
+# │                                                         │
+# │  TERMINAL 3 — trigger the payment (WITH metadata):      |
+# │   the command below is a single line delete the \       |
+# |                                                         │ 
+# │    stripe trigger payment_intent.succeeded \            │
+# │      --override payment_intent:metadata.femaleQty=2 \   │
+# │      --override payment_intent:metadata.maleQty=1       │
+# | Optional                                                |
+# |     --override payment_intent:amount=432 \              │ 
+# |     --override payment_intent:currency=cad              |
+# |                                                         |
+# │                                                         │
+# │  ⚠️  ALWAYS use the --override flags above.             │
+# │  Without them, femaleQty and maleQty default to 0       │
+# │  and zero tickets will be created.                      │
+# │                                                         │
+# │  ✅ WHAT TO LOOK FOR in Terminal 1 after triggering:    │
+# │    ════════════════════════════════════════════════     │
+# │    [Webhook] ✅ payment_intent.succeeded                │
+# │    [Webhook]    ID: pi_XXXXXXXXXXXXXXXX   ← COPY THIS   │
+# │    [Webhook]    Quantities → female: 2, male: 1         │
+# │    [Webhook]    Order saved ✓                           │
+# │    [Webhook]    Individual tickets created: 3 ✓         │
+# │    ════════════════════════════════════════════════     │
+# │                                                         │
+# │  Copy the  pi_XXXXXXXXXXXXXXXX  ID from your logs.      │
+# │  Paste it into Steps 4 and 5 below.                     │
+# └─────────────────────────────────────────────────────────┘
 
 
-### Test Scanner Auth — Correct PIN
+
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 4 — CHECK ORDER (legacy single-QR endpoint)       │
+# │  Purpose: confirm the order was saved after webhook     │
+# │                                                         │
+# │  Replace the pi_... ID below with the one from          │
+# │  your Terminal 1 logs in Step 3.                        │
+# │                                                         │
+# │  Before webhook fires: { "status": "pending" }          │
+# │  After webhook fires:  { "status": "ready", "qrToken":  │
+# │                           ..., "qrImageDataUrl": ... }  │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 4 — Get Order QR
+# 📋 PLACEHOLDER — paste the pi_... ID from Terminal 1 logs:
+# Last ID used: pi_3T7MfxGV3cwb7LAj26hFx57g
+# EXAMPLE: GET http://localhost:3000/api/orders/pi_REPLACE_WITH_YOUR_PAYMENT_INTENT_ID/qr
+GET http://localhost:3000/api/orders/pi_3T7MfxGV3cwb7LAj26hFx57g/qr
+
+
+
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 5 — GET INDIVIDUAL TICKETS (new endpoint)         │
+# │  Purpose: get all per-person QR codes for this order    │
+# │                                                         │
+# │  Use the SAME pi_... ID as Step 4.                      │
+# │                                                         │
+# │  Before webhook fires: { "status": "pending" }          │
+# │  After webhook fires:                                   │
+# │    {                                                    │
+# │      "status": "ready",                                 │
+# │      "tickets": [                                       │
+# │        { "id": "...", "ticketType": "female",           │
+# │          "qrToken": "abc123...",  ← COPY ONE OF THESE  │
+# │          "qrImageDataUrl": "..." },                     │
+# │        ...                                              │
+# │      ]                                                  │
+# │    }                                                    │
+# │                                                         │
+# │  Copy one qrToken value — you need it in Steps 8 and 9 │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 5 — Get Individual Tickets
+# 📋 PLACEHOLDER — same pi_... ID as Step 4:
+# Last ID used: pi_3T7MfxGV3cwb7LAj26hFx57g
+# EXAMPLE: GET http://localhost:3000/api/orders/pi_REPLACE_WITH_YOUR_PAYMENT_INTENT_ID/qr
+GET http://localhost:3000/api/orders/pi_3T7MfxGV3cwb7LAj26hFx57g/tickets
+
+
+
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 6 — SCANNER LOGIN (get your bearer token)         │
+# │  Purpose: authenticate as a door scanner                │
+# │                                                         │
+# │  The PIN is set in your .env file as SCANNER_PIN        │
+# │  Default is 1234.                                       │
+# │                                                         │
+# │  After sending the correct PIN:                         │
+# │  Copy the "token" value from the response.              │
+# │  You will paste it into Steps 7, 8, 9, 10.             │
+# │                                                         │
+# │  ✅ Correct PIN → { "token": "long-hex...", "expiresAt" }│
+# │  ❌ Wrong PIN   → { "error": "Incorrect PIN." } (401)   │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 6a — Scanner Auth (correct PIN — copy the token from response!)
+# 📋 PLACEHOLDER — paste the token into steps 7-10:
+# Last token: 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 POST http://localhost:3000/api/scanner/auth
 Content-Type: application/json
 
 {
   "pin": "1234"
 }
-###----------------------------------------------------------------------------------------------------------------------------
 
+###
 
-### Test Scanner Auth — Wrong PIN
+### Step 6b — Scanner Auth (wrong PIN — should return 401)
 POST http://localhost:3000/api/scanner/auth
 Content-Type: application/json
 
 {
   "pin": "0000"
 }
-###----------------------------------------------------------------------------------------------------------------------------
 
 
 
 
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 7 — FETCH ALL VALID TICKETS (scanner bulk load)   │
+# │  Purpose: see what the scanner app loads on startup     │
+# │                                                         │
+# │  Replace the token below with yours from Step 6.        │
+# │                                                         │
+# │  Expected: { "tickets": [...], "count": 3,              │
+# │              "fetchedAt": "..." }                       │
+# └─────────────────────────────────────────────────────────┘
 
-
-
-################################
-### Tickets Testing (requires valid auth token from above) - Correct PIN
-################################
-
-###----------------------------------------------------------------------------------------------------------------------------
-
-
-### Fetch all valid tickets-not scanned yet (replace YOUR_TOKEN with the token from auth) =>> requires Test Scanner Auth — Correct PIN First
+### Step 7 — Get All Valid Tickets
+# 📋 PLACEHOLDER — paste your bearer token from Step 6:
+# Last token: 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 GET http://localhost:3000/api/scanner/tickets
-Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
-##Authorization: Bearer EXAMPLE_aaaa55fdae5b25....
+Authorization: Bearer 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 
 
-###----------------------------------------------------------------------------------------------------------------------------
 
-### Scan a ticket (replace QR_TOKEN with a real qr_token from the tickets response)
-### =>> requires Test Scanner Auth — Correct PIN First   & FETCH ALL VALID TICKETS to get a real qr_token from the response
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 8 — SCAN A TICKET (first scan)                    │
+# │  Purpose: simulate the scanner reading a QR code        │
+# │                                                         │
+# │  Replace the bearer token with yours from Step 6.       │
+# │  Replace the qrToken with one from the Step 5 response. │
+# │                                                         │
+# │  ✅ Expected: { "result": "accepted",                   │
+# │                 "ticketType": "female" or "male" }      │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 8 — Scan a Ticket (first scan — should be ACCEPTED)
+# 📋 PLACEHOLDER — paste bearer token + qrToken:
+# Last token: 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 POST http://localhost:3000/api/scanner/scan
-Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
+Authorization: Bearer 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 Content-Type: application/json
 
 {
-  //"qrToken": "PASTE_A_QR_TOKEN_HERE"
-  "qrToken": "9720692da91ed21fc89e59cbc0eb88c5e73394e660f373282f41d3854fe6344c  "
+  //"qrToken": "PASTE_QR_TOKEN_FROM_STEP_5"
+  "qrToken": "eb6e9cd67d4043f65a17f890c05e97395f64a57125d69d5ad2a616c085f03f49"
 }
 
 
-###----------------------------------------------------------------------------------------------------------------------------
 
-### Scan the same ticket again (should be rejected)
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 9 — SCAN THE SAME TICKET AGAIN                    │
+# │  Purpose: prove that duplicate scans are rejected       │
+# │                                                         │
+# │  Use the exact same qrToken as Step 8.                  │
+# │                                                         │
+# │  ✅ Expected: { "result": "rejected",                   │
+# │                 "message": "Already Scanned" }          │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 9 — Scan Same Ticket Again (should be REJECTED)
+# 📋 PLACEHOLDER — same bearer token and qrToken as Step 8:
+# Last token: 6cecc2dd9e857f679d44d0d921c7326a3d3e6e488911a57bdad0b59bb9762b3f
 POST http://localhost:3000/api/scanner/scan
-Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
+Authorization: Bearer PASTE_BEARER_TOKEN_FROM_STEP_6
 Content-Type: application/json
 
 {
-  //"qrToken": "PASTE_A_QR_TOKEN_HERE"
-  "qrToken": "1414d0f7a11594e00c52561b9d2b0ef0468ac6af77b0742c5691d418bd864d26"
+  "qrToken": "PASTE_SAME_QR_TOKEN_AS_STEP_8"
 }
+
+
+
+
+# ┌─────────────────────────────────────────────────────────┐
+# │  STEP 10 — VERIFY TICKET COUNT DROPPED                  │
+# │  Purpose: confirm the scanned ticket is now gone        │
+# │           from the valid pool                           │
+# │                                                         │
+# │  If Step 3 created 3 tickets and you scanned 1,         │
+# │  this should now return count: 2                        │
+# └─────────────────────────────────────────────────────────┘
+
+### Step 10 — Get Valid Tickets Again (count should have dropped by 1)
+# 📋 PLACEHOLDER — paste your bearer token from Step 6:
+GET http://localhost:3000/api/scanner/tickets
+Authorization: Bearer PASTE_BEARER_TOKEN_FROM_STEP_6
+
+
+
+
+# =============================================================
+# PRODUCTION TESTS (Render)
+# Only run these after deploying to Render.
+# These point at your live server, not localhost.
+# =============================================================
+
+### Production — Health Check
+GET https://nomada-tickets-com-test.onrender.com/health
+
+###
+
+### Production — Create Payment Intent
+POST https://nomada-tickets-com-test.onrender.com/api/checkout/create-intent
+Content-Type: application/json
+
+{
+  "femaleQty": 1,
+  "maleQty": 1,
+  "language": "en"
+}
+
+
+
+
+# =============================================================
+# REFERENCE GUIDE
+# =============================================================
+#
+# ── THE DEPENDENCY CHAIN ─────────────────────────────────────
+#
+#   [1] Health check          → confirm server is up
+#        ↓
+#   [2] Create intent         → (ID not used in steps 4/5 — see two-ID problem) ONLY creates a PaymentIntent, does NOT trigger the webhook
+#        ↓
+#  Actual flow starts here — the rest of the steps depend on you running the stripe trigger command in your terminal
+#   [3] stripe trigger        → TERMINAL COMMAND, not HTTP
+#        ↓                      fires webhook → saves order + creates tickets in DB
+#        ↓                      prints pi_XXX in Terminal 1 logs  ← copy this
+#        ↓
+#   [4] GET /qr               → needs: pi_XXX from Terminal 1 logs
+#   [5] GET /tickets          → needs: pi_XXX from Terminal 1 logs → gives you: qrToken
+#        ↓
+#   [6] POST /scanner/auth    → needs: PIN from .env → gives you: bearer token
+#        ↓
+#   [7] GET /scanner/tickets  → needs: bearer token
+#   [8] POST /scanner/scan    → needs: bearer token + qrToken (from step 5)
+#   [9] POST /scanner/scan    → same qrToken again → proves duplicate rejection
+#  [10] GET /scanner/tickets  → proves count dropped by 1
+#
+# ── WHERE EACH VALUE COMES FROM ──────────────────────────────
+#
+#   paymentIntentId  → Terminal 1 server logs after Step 3 (NOT Step 2 response)
+#   bearer token     → "token" field in Step 6 response body
+#   qrToken          → "tickets[0].qrToken" in Step 5 response body
+#
+#
+# ── THE TWO-ID PROBLEM (most common confusion) ───────────────
+#
+#   Step 2 creates a PaymentIntent → gives you pi_AAA
+#   Step 3 (stripe trigger) creates a DIFFERENT PaymentIntent → pi_BBB
+#
+#   pi_AAA and pi_BBB are never the same.
+#   stripe trigger always creates its own brand new fake payment.
+#
+#   Steps 4 and 5 need the ID of whichever payment the WEBHOOK processed.
+#   That is ALWAYS the ID printed in your Terminal 1 server logs.
+#
+#   So the rule is simple:
+#     After Step 3 → look at Terminal 1 logs → find the line:
+#       [Webhook] ✅ payment_intent.succeeded
+#       [Webhook]    ID: pi_XXXXXXXXXXXXXXXX   ← use this
+#
+#
+# ── WHY 0 TICKETS GET CREATED ────────────────────────────────
+#
+#   Plain "stripe trigger payment_intent.succeeded" sends empty metadata.
+#   Your backend reads femaleQty/maleQty from metadata → gets 0/0 → 0 tickets.
+#
+#   Always use the --override version:
+#     stripe trigger payment_intent.succeeded \
+#       --override payment_intent:metadata.femaleQty=2 \
+#       --override payment_intent:metadata.maleQty=1
+#
+# ── COMMON ERRORS ────────────────────────────────────────────
+#
+#   "Missing stripe-signature header"
+#   → You tried to POST to /webhooks/stripe from this file.
+#     That is impossible — webhooks must come from Stripe CLI or Stripe itself.
+#
+#   { "status": "pending" } on GET /tickets
+#   → Two possible causes:
+#     a) Webhook hasn't fired — run stripe trigger in terminal
+#     b) You used the Step 2 paymentIntentId instead of the one from logs
+#
+#   401 Unauthorized on scanner endpoints
+#   → Your bearer token is expired, misspelled, or missing "Bearer " prefix
+#     Token expires after 12 hours — just run Step 6 again to get a new one
+#
+#   "Incorrect PIN."
+#   → Check SCANNER_PIN value in your .env file (default: 1234)
+#
+#   count still 3 after scanning in Step 10
+#   → The scan in Step 8 may have failed — check the Step 8 response
+#     It must say "accepted" for the ticket to be marked used
+#
+# =============================================================

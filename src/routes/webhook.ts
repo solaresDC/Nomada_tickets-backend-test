@@ -13,7 +13,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { verifyWebhookSignature } from '../plugins/stripe.js';
 import { orderStore } from '../services/supabaseOrderStore.js';
 import { generateQRToken } from '../services/qrService.js';
-import { ticketStore } from '../services/supabaseTicketStore.js'; // NEW
+import { ticketStore } from '../services/supabaseTicketStore.js';
 import Stripe from 'stripe';
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
@@ -40,10 +40,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     request: FastifyRequest,
     reply: FastifyReply
   ) => {
-    // Get the raw body (Buffer) - not parsed JSON
     const rawBody = request.body as Buffer;
-
-    // Get the Stripe signature header
     const signature = request.headers['stripe-signature'] as string;
 
     if (!signature) {
@@ -54,28 +51,22 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
     let event: Stripe.Event;
 
     try {
-      // Verify the webhook signature
-      // This will throw if verification fails
       event = verifyWebhookSignature(rawBody, signature);
     } catch (error) {
       console.error('[Webhook] Signature verification failed:', error);
       return reply.status(400).send({ error: 'Webhook signature verification failed' });
     }
 
-    console.log(`[Webhook] Received event: ${event.type} (${event.id})`);
-
-    // Handle specific event types
-    switch (event.type) {
-      case 'payment_intent.succeeded':
-        await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent);
-        break;
-
-      // Add more event handlers as needed
-      default:
-        console.log(`[Webhook] Unhandled event type: ${event.type}`);
+    // Low-noise log for unimportant events (charge.updated, payment_intent.created, etc.)
+    // These fire constantly and clutter the terminal — just skip them quietly
+    if (event.type !== 'payment_intent.succeeded') {
+      console.log(`[Webhook] Skipped: ${event.type}`);
+      return reply.status(200).send({ received: true });
     }
 
-    // Always return 200 to acknowledge receipt
+    // Only payment_intent.succeeded gets the full treatment
+    await handlePaymentIntentSucceeded(event.data.object as Stripe.PaymentIntent);
+
     return reply.status(200).send({ received: true });
   });
 }
@@ -85,20 +76,32 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
  *
  * This is where we:
  * 1. Check if we've already processed this payment (idempotency)
- * 2. Generate a QR token
- * 3. Store the order
- * 4. Create individual tickets (one QR per person) — NEW
+ * 2. Generate a QR token and save the order
+ * 3. Create individual tickets (one QR per person)
+ *
+ * ⚠️  IMPORTANT FOR LOCAL TESTING:
+ * "stripe trigger payment_intent.succeeded" without overrides sends
+ * empty metadata → femaleQty=0, maleQty=0 → 0 tickets created.
+ *
+ * Always use:
+ *   stripe trigger payment_intent.succeeded \
+ *     --override payment_intent:metadata.femaleQty=2 \
+ *     --override payment_intent:metadata.maleQty=1
  */
 async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent): Promise<void> {
   const paymentIntentId = paymentIntent.id;
 
-  console.log(`[Webhook] Processing payment_intent.succeeded: ${paymentIntentId}`);
+  console.log('\n' + '='.repeat(60));
+  console.log(`[Webhook] ✅ payment_intent.succeeded`);
+  console.log(`[Webhook]    ID: ${paymentIntentId}`);
+  console.log('='.repeat(60));
 
   // IDEMPOTENCY CHECK: Have we already processed this PaymentIntent?
   const alreadyProcessed = await orderStore.isPaymentIntentProcessed(paymentIntentId);
 
   if (alreadyProcessed) {
-    console.log(`[Webhook] PaymentIntent already processed (idempotency): ${paymentIntentId}`);
+    console.log(`[Webhook] ⏭️  Already processed — skipping (idempotency)`);
+    console.log('='.repeat(60) + '\n');
     return;
   }
 
@@ -111,10 +114,22 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
   const femaleQty = parseInt(metadata.femaleQty || '0', 10);
   const maleQty = parseInt(metadata.maleQty || '0', 10);
 
-  // Generate a secure QR token (kept for backwards compatibility on the order)
+  console.log(`[Webhook]    Quantities → female: ${femaleQty}, male: ${maleQty}`);
+
+  // Warn clearly if both are 0 — this almost always means stripe trigger
+  // was used without --override flags, so metadata arrived empty
+  if (femaleQty === 0 && maleQty === 0) {
+    console.warn(`[Webhook] ⚠️  Both quantities are 0. Metadata was likely empty.`);
+    console.warn(`[Webhook]    Use this command instead of plain stripe trigger:`);
+    console.warn(`[Webhook]    stripe trigger payment_intent.succeeded \\`);
+    console.warn(`[Webhook]      --override payment_intent:metadata.femaleQty=2 \\`);
+    console.warn(`[Webhook]      --override payment_intent:metadata.maleQty=1`);
+  }
+
+  // Generate a QR token and save the order
+  // (qrToken on the order is kept for backwards compatibility but is now legacy)
   const qrToken = generateQRToken();
 
-  // Store the order (unchanged — still tracks the payment)
   await orderStore.saveOrder({
     paymentIntentId,
     qrToken,
@@ -124,21 +139,32 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
     maleQty
   });
 
-  console.log(`[Webhook] Order created for PaymentIntent: ${paymentIntentId}`);
-  console.log(`[Webhook] QR Token (first 8 chars): ${qrToken.substring(0, 8)}...`);
+  console.log(`[Webhook]    Order saved ✓`);
+  console.log(`[Webhook]    Legacy QR: ${qrToken.substring(0, 8)}...`);
 
-  // NEW: Create individual tickets (one QR code per person)
-  // femaleQty=2, maleQty=1 → creates 3 rows in the tickets table
+  // Create individual tickets — one QR code per person
   try {
     const tickets = await ticketStore.createTicketsForOrder(
       paymentIntentId,
       femaleQty,
       maleQty
     );
-    console.log(`[Webhook] Created ${tickets.length} individual tickets for ${paymentIntentId}`);
+
+    if (tickets.length === 0) {
+      console.warn(`[Webhook] ⚠️  0 tickets created — see quantity warning above`);
+    } else {
+      console.log(`[Webhook]    Individual tickets created: ${tickets.length} ✓`);
+      tickets.forEach((t, i) => {
+        console.log(`[Webhook]      [${i + 1}] ${t.ticketType.padEnd(6)} → ${t.qrToken.substring(0, 8)}...`);
+      });
+    }
   } catch (ticketError) {
-    console.error('[Webhook] Failed to create tickets:', ticketError);
+    console.error('[Webhook] ❌ Failed to create tickets:', ticketError);
     // Don't fail the webhook — the order is still saved
-    // We can manually create tickets later if needed
+    // Tickets can be manually created later if needed
   }
+
+console.log('='.repeat(60));
+console.log(`[Webhook] ✅ DONE — ${paymentIntentId}`);
+console.log('='.repeat(60) + '\n\n');
 }
