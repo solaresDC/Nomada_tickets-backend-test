@@ -15,6 +15,7 @@ import { registerHelmet } from './plugins/helmet.js';
 import { checkoutRoutes } from './routes/checkout.js';
 import { webhookRoutes } from './routes/webhook.js';
 import { orderRoutes } from './routes/orders.js';
+import { scannerRoutes } from './routes/scanner.js';
 
 // Create Fastify instance
 const app = Fastify({
@@ -63,6 +64,9 @@ async function registerRoutes(): Promise<void> {
   app.get('/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
+
+  // Scanner routes
+  await scannerRoutes(app);
 }
 
 /**

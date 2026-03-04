@@ -1,6 +1,12 @@
 ### Health Check
 GET http://localhost:3000/health
 
+
+
+
+###----------------------------------------------------------------------------------------------------------------------------
+
+
 ### Create PaymentIntent - Valid request
 POST http://localhost:3000/api/checkout/create-intent
 Content-Type: application/json
@@ -11,6 +17,9 @@ Content-Type: application/json
   "language": "en"
 }
 
+
+###----------------------------------------------------------------------------------------------------------------------------
+
 ### Create PaymentIntent - Both zero (should fail)
 POST http://localhost:3000/api/checkout/create-intent
 Content-Type: application/json
@@ -20,6 +29,9 @@ Content-Type: application/json
   "maleQty": 0,
   "language": "en"
 }
+###----------------------------------------------------------------------------------------------------------------------------
+
+
 
 ### Create PaymentIntent - Negative (should fail)
 POST http://localhost:3000/api/checkout/create-intent
@@ -30,13 +42,33 @@ Content-Type: application/json
   "maleQty": 1,
   "language": "en"
 }
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+################################
+### QR PROCESSING TESTS (requires valid PaymentIntent ID from above)
+################################
 
 ### Get QR code "pending"(will be pending until webhook fires)
 GET http://localhost:3000/api/orders/pi_test_placeholder/qr
+###----------------------------------------------------------------------------------------------------------------------------
+
 
 ### Get QR code "ready, etc..." (after webhook fires, requires to provide !!SUCCEEDED!! PaymentIntent ID)
-GET http://localhost:3000/api/orders/pi_3SqjGPGV3cwb7LAj3Vu2EDWv/qr
+GET http://localhost:3000/api/orders/pi_3T7Jj4GV3cwb7LAj0DqWZp1G/qr
+## GET http://localhost:3000/api/orders/[paymentIntentId_HERE]/qr
+###----------------------------------------------------------------------------------------------------------------------------
 
+
+
+
+
+################################
+### test render hosted backend
+################################
 
 ### test render
 POST https://nomada-tickets-com-test.onrender.com/api/checkout/create-intent 
@@ -46,4 +78,81 @@ Content-Type: application/json
 "femaleQty": 1, 
 "maleQty": 1, 
 "language": "en"
+}
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+################################
+### Scanner Auth Tests 
+################################
+
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+### Test Scanner Auth — Correct PIN
+POST http://localhost:3000/api/scanner/auth
+Content-Type: application/json
+
+{
+  "pin": "1234"
+}
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+### Test Scanner Auth — Wrong PIN
+POST http://localhost:3000/api/scanner/auth
+Content-Type: application/json
+
+{
+  "pin": "0000"
+}
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+################################
+### Tickets Testing (requires valid auth token from above) - Correct PIN
+################################
+
+###----------------------------------------------------------------------------------------------------------------------------
+
+
+### Fetch all valid tickets-not scanned yet (replace YOUR_TOKEN with the token from auth) =>> requires Test Scanner Auth — Correct PIN First
+GET http://localhost:3000/api/scanner/tickets
+Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
+##Authorization: Bearer EXAMPLE_aaaa55fdae5b25....
+
+
+###----------------------------------------------------------------------------------------------------------------------------
+
+### Scan a ticket (replace QR_TOKEN with a real qr_token from the tickets response)
+### =>> requires Test Scanner Auth — Correct PIN First   & FETCH ALL VALID TICKETS to get a real qr_token from the response
+POST http://localhost:3000/api/scanner/scan
+Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
+Content-Type: application/json
+
+{
+  //"qrToken": "PASTE_A_QR_TOKEN_HERE"
+  "qrToken": "9720692da91ed21fc89e59cbc0eb88c5e73394e660f373282f41d3854fe6344c  "
+}
+
+
+###----------------------------------------------------------------------------------------------------------------------------
+
+### Scan the same ticket again (should be rejected)
+POST http://localhost:3000/api/scanner/scan
+Authorization: Bearer cda0c170cb48bde3dfd2e08f6a62aab859590659f6dcd8976b14c5fccbf86b6c
+Content-Type: application/json
+
+{
+  //"qrToken": "PASTE_A_QR_TOKEN_HERE"
+  "qrToken": "1414d0f7a11594e00c52561b9d2b0ef0468ac6af77b0742c5691d418bd864d26"
 }

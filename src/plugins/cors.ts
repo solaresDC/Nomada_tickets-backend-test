@@ -24,8 +24,9 @@ export async function registerCors(app: FastifyInstance): Promise<void> {
   // Production origin — set this in Render environment variables
   // Example: https://nomada-tickets-frontend-test.pages.dev
   const productionOrigin = process.env.FRONTEND_ORIGIN || '';
+  const scannerOrigin = process.env.SCANNER_ORIGIN || '';
 
-  const allowedOrigins = [...devOrigins, productionOrigin].filter(Boolean);
+  const allowedOrigins = [...devOrigins, productionOrigin, scannerOrigin].filter(Boolean);
 
   await app.register(cors, {
     origin: isDevelopment ? true : (origin, callback) => {
