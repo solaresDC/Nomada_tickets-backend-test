@@ -75,7 +75,7 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
  * Handles the payment_intent.succeeded event.
  *
  * This is where we:
- * 1. Check if we've already processed this payment (idempotency)
+ * 1. Atomically claim the payment (race-safe idempotency)
  * 2. Generate a QR token and save the order
  * 3. Create individual tickets (one QR per person)
  *
@@ -96,18 +96,27 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
   console.log(`[Webhook]    ID: ${paymentIntentId}`);
   console.log('='.repeat(60));
 
-  // IDEMPOTENCY CHECK: Have we already processed this PaymentIntent?
-  const alreadyProcessed = await orderStore.isPaymentIntentProcessed(paymentIntentId);
+  // ────────────────────────────────────────────────────────────
+  // ATOMIC IDEMPOTENCY CHECK
+  //
+  // OLD (race condition — caused duplicate tickets):
+  //   const alreadyProcessed = await orderStore.isPaymentIntentProcessed(paymentIntentId);
+  //   if (alreadyProcessed) { return; }
+  //   await orderStore.markPaymentIntentProcessed(paymentIntentId);
+  //
+  // PROBLEM: Two webhooks arriving milliseconds apart could BOTH
+  // pass isPaymentIntentProcessed() before either finished marking.
+  // Both would then create tickets → duplicates.
+  //
+  // NEW: Single atomic database call — only one caller wins.
+  // ────────────────────────────────────────────────────────────
+  const claimed = await orderStore.tryClaimPaymentIntent(paymentIntentId);
 
-  if (alreadyProcessed) {
+  if (!claimed) {
     console.log(`[Webhook] ⏭️  Already processed — skipping (idempotency)`);
     console.log('='.repeat(60) + '\n');
     return;
   }
-
-  // Mark as processed BEFORE doing anything else
-  // This prevents race conditions with duplicate webhooks
-  await orderStore.markPaymentIntentProcessed(paymentIntentId);
 
   // Extract metadata from PaymentIntent
   const metadata = paymentIntent.metadata;
@@ -119,7 +128,8 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
   // Warn clearly if both are 0 — this almost always means stripe trigger
   // was used without --override flags, so metadata arrived empty
   if (femaleQty === 0 && maleQty === 0) {
-    console.warn(`[Webhook] ⚠️  Both quantities are 0. Metadata was likely empty.`);
+    console.warn(`[Webhook] ⚠️  Both quantities are 0.`);
+    console.warn(`[Webhook]    Metadata was likely empty.`);
     console.warn(`[Webhook]    Use this command instead of plain stripe trigger:`);
     console.warn(`[Webhook]    stripe trigger payment_intent.succeeded \\`);
     console.warn(`[Webhook]      --override payment_intent:metadata.femaleQty=2 \\`);
@@ -164,7 +174,7 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
     // Tickets can be manually created later if needed
   }
 
-console.log('='.repeat(60));
-console.log(`[Webhook] ✅ DONE — ${paymentIntentId}`);
-console.log('='.repeat(60) + '\n\n');
+  console.log('='.repeat(60));
+  console.log(`[Webhook] ✅ DONE — ${paymentIntentId}`);
+  console.log('='.repeat(60) + '\n\n');
 }

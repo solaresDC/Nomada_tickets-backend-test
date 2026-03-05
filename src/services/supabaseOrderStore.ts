@@ -1,28 +1,35 @@
 /**
  * Supabase Order Store
- * 
- * Implements the OrderStore interface using Supabase (PostgreSQL).
- * This replaces InMemoryOrderStore for production use.
- * 
- * Data is stored permanently in the database and survives server restarts.
- * 
- * Tables used:
- *   - orders: Stores completed orders with QR tokens
- *   - processed_payment_intents: Tracks which payments have been processed (idempotency)
+ *
+ * Implements OrderStore using Supabase (PostgreSQL).
+ * This is the production storage backend.
  */
 
-import { Order, OrderStore } from './orderStore.js';
 import { supabase } from '../plugins/supabase.js';
+import type { Order, OrderStore } from './orderStore.js';
+
+// Environment validation
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL) {
+  throw new Error(
+    '[Supabase] Missing SUPABASE_URL environment variable. ' +
+    'Add it to your .env file. Get it from: Supabase Dashboard > Settings > API'
+  );
+}
+
+if (!SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error(
+    '[Supabase] Missing SUPABASE_SERVICE_ROLE_KEY environment variable. ' +
+    'Add it to your .env file. Get it from: Supabase Dashboard > Settings > API'
+  );
+}
 
 export class SupabaseOrderStore implements OrderStore {
-  
+
   /**
    * Save a new order to the database
-   * 
-   * Uses "upsert" which means:
-   * - If the order doesn't exist → INSERT it (create new)
-   * - If the order already exists → UPDATE it (overwrite)
-   * This makes it safe to call multiple times with the same data.
    */
   async saveOrder(order: Order): Promise<void> {
     const { error } = await supabase
@@ -46,7 +53,6 @@ export class SupabaseOrderStore implements OrderStore {
 
   /**
    * Get an order by its PaymentIntent ID
-   * 
    * Returns null if no order exists yet (payment hasn't completed)
    */
   async getOrderByPaymentIntentId(paymentIntentId: string): Promise<Order | null> {
@@ -56,7 +62,6 @@ export class SupabaseOrderStore implements OrderStore {
       .eq('payment_intent_id', paymentIntentId)
       .single();
 
-    // "PGRST116" means "no rows found" — that's not an error, just means the order doesn't exist yet
     if (error) {
       if (error.code === 'PGRST116') {
         return null;
@@ -69,7 +74,6 @@ export class SupabaseOrderStore implements OrderStore {
       return null;
     }
 
-    // Convert database row format (snake_case) back to our TypeScript format (camelCase)
     return {
       paymentIntentId: data.payment_intent_id,
       qrToken: data.qr_token,
@@ -83,9 +87,8 @@ export class SupabaseOrderStore implements OrderStore {
   /**
    * Check if a PaymentIntent has already been processed
    * 
-   * This is crucial for IDEMPOTENCY:
-   * Stripe might send the same webhook event multiple times.
-   * We check this table to avoid creating duplicate QR codes.
+   * ⚠️  DEPRECATED — kept for backward compatibility.
+   * Use tryClaimPaymentIntent() instead for race-safe idempotency.
    */
   async isPaymentIntentProcessed(paymentIntentId: string): Promise<boolean> {
     const { data, error } = await supabase
@@ -94,7 +97,6 @@ export class SupabaseOrderStore implements OrderStore {
       .eq('payment_intent_id', paymentIntentId)
       .single();
 
-    // "PGRST116" = not found = not processed yet
     if (error && error.code === 'PGRST116') {
       return false;
     }
@@ -110,8 +112,8 @@ export class SupabaseOrderStore implements OrderStore {
   /**
    * Mark a PaymentIntent as processed
    * 
-   * Called right after we successfully handle a webhook event,
-   * so we know not to process it again if Stripe resends it.
+   * ⚠️  DEPRECATED — kept for backward compatibility.
+   * Use tryClaimPaymentIntent() instead for race-safe idempotency.
    */
   async markPaymentIntentProcessed(paymentIntentId: string): Promise<void> {
     const { error } = await supabase
@@ -127,6 +129,55 @@ export class SupabaseOrderStore implements OrderStore {
     }
 
     console.log(`[SupabaseOrderStore] Marked PaymentIntent as processed: ${paymentIntentId}`);
+  }
+
+  /**
+   * Atomically try to claim a PaymentIntent for processing.
+   * 
+   * This replaces the old two-step pattern that had a race condition:
+   *   OLD: isPaymentIntentProcessed() → false → markPaymentIntentProcessed()
+   *   PROBLEM: Two webhooks could both get "false" before either marks it.
+   * 
+   * NEW: Single database operation — the database itself ensures only
+   * one of two simultaneous calls succeeds and returns data.
+   * 
+   * How it works:
+   *   - ignoreDuplicates: true tells Supabase to use INSERT ... ON CONFLICT DO NOTHING
+   *   - If the row doesn't exist yet → inserts it → .select() returns the new row → claimed = true
+   *   - If the row already exists → does nothing → .select() returns empty array → claimed = false
+   * 
+   * Returns true if THIS call claimed it (proceed with ticket creation).
+   * Returns false if already claimed by a previous webhook (skip).
+   */
+  async tryClaimPaymentIntent(paymentIntentId: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('processed_payment_intents')
+      .upsert(
+        {
+          payment_intent_id: paymentIntentId,
+          processed_at: new Date().toISOString(),
+        },
+        {
+          onConflict: 'payment_intent_id',
+          ignoreDuplicates: true,
+        }
+      )
+      .select();
+
+    if (error) {
+      console.error('[SupabaseOrderStore] Failed to claim PaymentIntent:', error.message);
+      throw new Error(`Failed to claim PaymentIntent: ${error.message}`);
+    }
+
+    const claimed = data !== null && data.length > 0;
+
+    if (claimed) {
+      console.log(`[SupabaseOrderStore] ✅ Claimed PaymentIntent: ${paymentIntentId}`);
+    } else {
+      console.log(`[SupabaseOrderStore] ⏭️  Already claimed: ${paymentIntentId}`);
+    }
+
+    return claimed;
   }
 }
 
