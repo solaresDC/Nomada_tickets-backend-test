@@ -48,6 +48,22 @@ export class InMemoryOrderStore implements OrderStore {
     this.processedPaymentIntents.add(paymentIntentId);
     console.log(`[OrderStore] Marked PaymentIntent as processed: ${paymentIntentId}`);
   }
+
+    /**
+   * Atomically try to claim a PaymentIntent for processing.
+   * In-memory version: uses Set.has() check + add in one step.
+   * No real race condition risk in single-threaded Node, but
+   * mirrors the Supabase version for interface compliance.
+   */
+  async tryClaimPaymentIntent(paymentIntentId: string): Promise<boolean> {
+    if (this.processedPaymentIntents.has(paymentIntentId)) {
+      console.log(`[OrderStore] ⏭️  Already claimed: ${paymentIntentId}`);
+      return false;
+    }
+    this.processedPaymentIntents.add(paymentIntentId);
+    console.log(`[OrderStore] ✅ Claimed PaymentIntent: ${paymentIntentId}`);
+    return true;
+  }
 }
 
 // Create a single instance to be used throughout the application
