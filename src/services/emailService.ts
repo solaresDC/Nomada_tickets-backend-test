@@ -5,9 +5,16 @@
  * Called by the webhook after tickets are created.
  *
  * This service:
- * - Builds an HTML email with QR codes for each ticket
+ * - Builds an HTML email with QR codes as CID-attached images
  * - Sends one email per order (containing all tickets)
  * - Handles errors gracefully (email failure does NOT break ticket creation)
+ *
+ * WHY CID ATTACHMENTS instead of data: URLs?
+ * Most email clients (Gmail, Outlook, Yahoo, Apple Mail) BLOCK inline
+ * base64 data: URLs in <img src="data:..."> for security reasons.
+ * CID (Content-ID) attachments are the industry standard — the image
+ * is sent as an actual email attachment and referenced via cid:filename.
+ * Every email client supports this.
  */
 
 import { Resend } from 'resend';
@@ -90,6 +97,14 @@ function t(lang: string, key: string): string {
 
 // ─── HTML Email Builder ──────────────────────────────────────
 
+/**
+ * Builds the HTML email body.
+ *
+ * IMPORTANT: Instead of <img src="data:image/png;base64,...">
+ * we now use <img src="cid:qr-0"> where "qr-0" is a Content-ID
+ * that maps to an attached image. This is what makes QR codes
+ * actually appear in Gmail, Outlook, Yahoo, etc.
+ */
 function buildTicketEmailHtml(params: SendTicketEmailParams): string {
   const { eventName, tickets, language } = params;
   const lang = language || 'en';
@@ -102,6 +117,10 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 
     const typeColor = ticket.ticketType === 'female' ? '#E91E8C' : '#2196F3';
 
+    // Use cid: reference instead of data: URL
+    // The matching attachment uses filename "qr-0.png", "qr-1.png", etc.
+    const cidName = `qr-${index}`;
+
     return `
       <div style="background: #ffffff; border-radius: 12px; padding: 24px; margin-bottom: 20px; text-align: center; border: 1px solid #e0e0e0;">
         <div style="font-size: 14px; color: #666; margin-bottom: 8px;">
@@ -109,7 +128,7 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
         </div>
         <div style="margin-bottom: 12px;">
           <img
-            src="${ticket.qrImageDataUrl}"
+            src="cid:${cidName}"
             alt="QR Code"
             width="200"
             height="200"
@@ -171,6 +190,53 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
   `.trim();
 }
 
+// ─── Helper: Extract base64 from data URL ────────────────────
+
+/**
+ * Takes "data:image/png;base64,iVBOR..." and returns just "iVBOR..."
+ * This is needed because Resend attachments want raw base64, not the full data URL.
+ */
+function extractBase64FromDataUrl(dataUrl: string): string {
+  const marker = 'base64,';
+  const markerIndex = dataUrl.indexOf(marker);
+  if (markerIndex === -1) {
+    // If it's already raw base64 (no data: prefix), return as-is
+    return dataUrl;
+  }
+  return dataUrl.substring(markerIndex + marker.length);
+}
+
+// ─── Build CID Attachments ───────────────────────────────────
+
+/**
+ * Creates the attachments array for Resend.
+ * Each QR code becomes an inline attachment with a Content-ID (cid).
+ *
+ * The HTML references these as <img src="cid:qr-0">, <img src="cid:qr-1">, etc.
+ * Resend matches them by the `filename` field (without extension) or by explicit headers.
+ */
+function buildAttachments(tickets: TicketForEmail[]): Array<{
+  filename: string;
+  content: Buffer;
+  content_type: string;
+  headers: Record<string, string>;
+}> {
+  return tickets.map((ticket, index) => {
+    const cidName = `qr-${index}`;
+    const base64Data = extractBase64FromDataUrl(ticket.qrImageDataUrl);
+
+    return {
+      filename: `${cidName}.png`,
+      content: Buffer.from(base64Data, 'base64'),
+      content_type: 'image/png',
+      headers: {
+        'Content-ID': `<${cidName}>`,
+        'Content-Disposition': 'inline',
+      },
+    };
+  });
+}
+
 // ─── Send Function ───────────────────────────────────────────
 
 /**
@@ -198,12 +264,16 @@ export async function sendTicketEmail(params: SendTicketEmailParams): Promise<bo
 
   try {
     const html = buildTicketEmailHtml(params);
+    const attachments = buildAttachments(params.tickets);
+
+    console.log(`[Email] Sending ${attachments.length} QR attachment(s) to ${params.to}`);
 
     const result = await resend.emails.send({
       from: EMAIL_FROM,
       to: params.to,
       subject: `${t(lang, 'subject')} — ${params.eventName}`,
       html: html,
+      attachments: attachments,
     });
 
     console.log(`[Email] ✅ Sent to ${params.to} — Resend ID: ${result.data?.id}`);
