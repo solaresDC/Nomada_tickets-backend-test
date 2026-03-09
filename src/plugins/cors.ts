@@ -38,7 +38,7 @@ export async function registerCors(app: FastifyInstance): Promise<void> {
         callback(new Error('Not allowed by CORS'), false);
       }
     },
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
     maxAge: 86400
