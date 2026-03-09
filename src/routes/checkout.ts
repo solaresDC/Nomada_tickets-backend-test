@@ -138,18 +138,19 @@ export async function checkoutRoutes(app: FastifyInstance): Promise<void> {
    * Request body:
    * {
    *   "paymentIntentId": string,
-   *   "email": string
+   *   "email": string,
+   *   "language": string
    * }
    * 
    * Response:
    * { "ok": true }
    */
   app.patch('/api/checkout/update-intent-email', async (
-    request: FastifyRequest<{ Body: { paymentIntentId: string; email: string } }>,
+    request: FastifyRequest<{ Body: { paymentIntentId: string; email: string; language?: string } }>,
     reply: FastifyReply
   ) => {
     try {
-      const { paymentIntentId, email } = request.body as { paymentIntentId: string; email: string };
+      const { paymentIntentId, email, language } = request.body as { paymentIntentId: string; email: string; language?: string };
 
       if (!paymentIntentId || !email) {
         return reply.status(400).send({ error: 'Missing paymentIntentId or email' });
@@ -157,12 +158,17 @@ export async function checkoutRoutes(app: FastifyInstance): Promise<void> {
 
       console.log(`[Checkout] Updating email on PaymentIntent: ${paymentIntentId}`);
 
+      const metadataUpdate: Record<string, string> = { email };
+      if (language) {
+        metadataUpdate.language = language;
+      }
+
       await stripe.paymentIntents.update(paymentIntentId, {
-        metadata: { email },
+        metadata: metadataUpdate,
         receipt_email: email
       });
 
-      console.log(`[Checkout] Email updated on PaymentIntent: ${paymentIntentId}`);
+      console.log(`[Checkout] Email + language updated on PaymentIntent: ${paymentIntentId}`);
 
       return reply.status(200).send({ ok: true });
 
