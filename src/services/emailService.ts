@@ -5,24 +5,24 @@
  * Called by the webhook after tickets are created.
  *
  * This service:
- * - Builds an HTML email with QR codes as CID-attached images
+ * - Builds an HTML email with QR codes as CID-attached images (inline in body)
+ * - ALSO attaches the same QR codes as regular PNG file downloads (fallback)
  * - Sends one email per order (containing all tickets)
  * - Handles errors gracefully (email failure does NOT break ticket creation)
- *
- * WHY CID ATTACHMENTS instead of data: URLs?
- * Most email clients (Gmail, Outlook, Yahoo, Apple Mail) BLOCK inline
- * base64 data: URLs in <img src="data:..."> for security reasons.
- * CID (Content-ID) attachments are the industry standard — the image
- * is sent as an actual email attachment and referenced via cid:filename.
- * Every email client supports this.
  *
  * RESEND CID FORMAT (from their official docs):
  *   attachments: [{
  *     content: "<base64 string>",   // NOT a Buffer — raw base64 text
  *     filename: "qr-0.png",
- *     contentId: "qr-0",            // camelCase, NOT content_id or headers
+ *     contentId: "qr-0",            // camelCase — makes it inline CID
  *   }]
  *   HTML: <img src="cid:qr-0" />
+ *
+ * REGULAR ATTACHMENTS (no contentId = downloadable file):
+ *   attachments: [{
+ *     content: "<base64 string>",
+ *     filename: "ticket-1-women.png",
+ *   }]
  */
 
 import { Resend } from 'resend';
@@ -31,8 +31,6 @@ import { Resend } from 'resend';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || 'tickets@yourdomain.com';
 
-// Only create the Resend client if the API key is set
-// This allows the server to start without Resend configured (for local dev)
 let resend: Resend | null = null;
 
 if (RESEND_API_KEY) {
@@ -51,9 +49,9 @@ interface TicketForEmail {
 }
 
 interface SendTicketEmailParams {
-  to: string;                // Buyer's email address
-  eventName: string;         // Name of the event
-  tickets: TicketForEmail[]; // All tickets for this order
+  to: string;
+  eventName: string;
+  tickets: TicketForEmail[];
   language: string;          // 'en' | 'es' | 'pt-BR'
 }
 
@@ -105,13 +103,6 @@ function t(lang: string, key: string): string {
 
 // ─── HTML Email Builder ──────────────────────────────────────
 
-/**
- * Builds the HTML email body.
- *
- * Uses <img src="cid:qr-0"> where "qr-0" is a Content-ID
- * that maps to an attached image. This is what makes QR codes
- * actually appear in Gmail, Outlook, Yahoo, etc.
- */
 function buildTicketEmailHtml(params: SendTicketEmailParams): string {
   const { eventName, tickets, language } = params;
   const lang = language || 'en';
@@ -123,8 +114,6 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
       : t(lang, 'menTicket');
 
     const typeColor = ticket.ticketType === 'female' ? '#E91E8C' : '#2196F3';
-
-    // Use cid: reference — must match the contentId in attachments
     const cidName = `qr-${index}`;
 
     return `
@@ -198,68 +187,69 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 
 // ─── Helper: Extract base64 from data URL ────────────────────
 
-/**
- * Takes "data:image/png;base64,iVBOR..." and returns just "iVBOR..."
- * Resend wants the raw base64 STRING, not a Buffer, not the full data URL.
- */
 function extractBase64FromDataUrl(dataUrl: string): string {
   const marker = 'base64,';
   const markerIndex = dataUrl.indexOf(marker);
   if (markerIndex === -1) {
-    // If it's already raw base64 (no data: prefix), return as-is
     return dataUrl;
   }
   return dataUrl.substring(markerIndex + marker.length);
 }
 
-// ─── Build CID Attachments ───────────────────────────────────
+// ─── Build ALL Attachments (CID inline + regular downloads) ──
 
 /**
- * Creates the attachments array for Resend using their OFFICIAL format.
+ * Creates TWO attachments per QR code:
  *
- * From Resend docs (https://resend.com/docs/dashboard/emails/embed-inline-images):
- *   attachments: [{
- *     content: "<base64 string>",    // base64 encoded image as a STRING
- *     filename: "logo.png",          // any filename
- *     contentId: "logo-image",       // camelCase! matches cid:logo-image in HTML
- *   }]
+ * 1. CID inline (has contentId) → renders inside the HTML body
+ *    - contentId: "qr-0"  ←  links to <img src="cid:qr-0">
  *
- * WHAT WAS WRONG BEFORE:
- *   - Used Buffer.from(...) instead of raw base64 string
- *   - Used "content_type" and "headers" fields that Resend ignores
- *   - Resend silently ignored the unknown fields → images never attached inline
+ * 2. Regular downloadable (NO contentId) → shows as attached PNG file
+ *    - filename: "Ticket-1-Women Ticket.png"  (human-friendly)
+ *
+ * Modern clients show the QR inline. Old phones can open the attached PNGs.
  */
-function buildAttachments(tickets: TicketForEmail[]) {
-  return tickets.map((ticket, index) => {
-    const cidName = `qr-${index}`;
-    const base64Data = extractBase64FromDataUrl(ticket.qrImageDataUrl);
+function buildAttachments(tickets: TicketForEmail[], lang: string) {
+  const attachments: Array<{
+    content: string;
+    filename: string;
+    contentId?: string;
+  }> = [];
 
-    return {
-      content: base64Data,           // Raw base64 STRING (not Buffer!)
-      filename: `${cidName}.png`,    // Filename for the attachment
-      contentId: cidName,            // camelCase — matches cid:qr-0 in HTML
-    };
+  tickets.forEach((ticket, index) => {
+    const base64Data = extractBase64FromDataUrl(ticket.qrImageDataUrl);
+    const cidName = `qr-${index}`;
+
+    const typeLabel = ticket.ticketType === 'female'
+      ? t(lang, 'womenTicket')
+      : t(lang, 'menTicket');
+    const friendlyName = `${t(lang, 'ticketLabel')}-${index + 1}-${typeLabel}.png`;
+
+    // 1) CID inline — renders in the email body
+    attachments.push({
+      content: base64Data,
+      filename: `${cidName}.png`,
+      contentId: cidName,
+    });
+
+    // 2) Regular downloadable — same image, no contentId
+    attachments.push({
+      content: base64Data,
+      filename: friendlyName,
+    });
   });
+
+  return attachments;
 }
 
 // ─── Send Function ───────────────────────────────────────────
 
-/**
- * Sends a ticket confirmation email.
- *
- * IMPORTANT: This function never throws. If the email fails,
- * it logs the error and returns false. This is intentional —
- * a failed email should NEVER prevent the ticket from being created
- * or the webhook from responding 200 to Stripe.
- */
 export async function sendTicketEmail(params: SendTicketEmailParams): Promise<boolean> {
-  // If Resend is not configured, skip silently
   if (!resend) {
     console.warn('[Email] Skipping email — Resend not configured');
     return false;
   }
 
-  // Validate email
   if (!params.to || !params.to.includes('@')) {
     console.warn(`[Email] Skipping email — invalid address: ${params.to}`);
     return false;
@@ -269,13 +259,11 @@ export async function sendTicketEmail(params: SendTicketEmailParams): Promise<bo
 
   try {
     const html = buildTicketEmailHtml(params);
-    const attachments = buildAttachments(params.tickets);
+    const attachments = buildAttachments(params.tickets, lang);
 
-    console.log(`[Email] Sending ${attachments.length} QR attachment(s) to ${params.to}`);
-    // Log attachment details to confirm data is present
-    attachments.forEach((att, i) => {
-      console.log(`[Email]   Attachment ${i}: filename=${att.filename}, contentId=${att.contentId}, base64 length=${att.content.length}`);
-    });
+    const inlineCount = attachments.filter(a => a.contentId).length;
+    const downloadCount = attachments.filter(a => !a.contentId).length;
+    console.log(`[Email] Sending to ${params.to} — ${inlineCount} inline CID + ${downloadCount} downloadable PNGs`);
 
     const result = await resend.emails.send({
       from: EMAIL_FROM,
