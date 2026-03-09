@@ -19,6 +19,7 @@ export async function registerCors(app: FastifyInstance): Promise<void> {
   const devOrigins = [
     'http://localhost:5500',
     'http://127.0.0.1:5500',
+    'https://nomada-tickets-frontend-test.pages.dev',
   ];
 
   // Production origin — set this in Render environment variables
