@@ -15,6 +15,14 @@
  * CID (Content-ID) attachments are the industry standard — the image
  * is sent as an actual email attachment and referenced via cid:filename.
  * Every email client supports this.
+ *
+ * RESEND CID FORMAT (from their official docs):
+ *   attachments: [{
+ *     content: "<base64 string>",   // NOT a Buffer — raw base64 text
+ *     filename: "qr-0.png",
+ *     contentId: "qr-0",            // camelCase, NOT content_id or headers
+ *   }]
+ *   HTML: <img src="cid:qr-0" />
  */
 
 import { Resend } from 'resend';
@@ -100,8 +108,7 @@ function t(lang: string, key: string): string {
 /**
  * Builds the HTML email body.
  *
- * IMPORTANT: Instead of <img src="data:image/png;base64,...">
- * we now use <img src="cid:qr-0"> where "qr-0" is a Content-ID
+ * Uses <img src="cid:qr-0"> where "qr-0" is a Content-ID
  * that maps to an attached image. This is what makes QR codes
  * actually appear in Gmail, Outlook, Yahoo, etc.
  */
@@ -117,8 +124,7 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 
     const typeColor = ticket.ticketType === 'female' ? '#E91E8C' : '#2196F3';
 
-    // Use cid: reference instead of data: URL
-    // The matching attachment uses filename "qr-0.png", "qr-1.png", etc.
+    // Use cid: reference — must match the contentId in attachments
     const cidName = `qr-${index}`;
 
     return `
@@ -194,7 +200,7 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 
 /**
  * Takes "data:image/png;base64,iVBOR..." and returns just "iVBOR..."
- * This is needed because Resend attachments want raw base64, not the full data URL.
+ * Resend wants the raw base64 STRING, not a Buffer, not the full data URL.
  */
 function extractBase64FromDataUrl(dataUrl: string): string {
   const marker = 'base64,';
@@ -209,30 +215,29 @@ function extractBase64FromDataUrl(dataUrl: string): string {
 // ─── Build CID Attachments ───────────────────────────────────
 
 /**
- * Creates the attachments array for Resend.
- * Each QR code becomes an inline attachment with a Content-ID (cid).
+ * Creates the attachments array for Resend using their OFFICIAL format.
  *
- * The HTML references these as <img src="cid:qr-0">, <img src="cid:qr-1">, etc.
- * Resend matches them by the `filename` field (without extension) or by explicit headers.
+ * From Resend docs (https://resend.com/docs/dashboard/emails/embed-inline-images):
+ *   attachments: [{
+ *     content: "<base64 string>",    // base64 encoded image as a STRING
+ *     filename: "logo.png",          // any filename
+ *     contentId: "logo-image",       // camelCase! matches cid:logo-image in HTML
+ *   }]
+ *
+ * WHAT WAS WRONG BEFORE:
+ *   - Used Buffer.from(...) instead of raw base64 string
+ *   - Used "content_type" and "headers" fields that Resend ignores
+ *   - Resend silently ignored the unknown fields → images never attached inline
  */
-function buildAttachments(tickets: TicketForEmail[]): Array<{
-  filename: string;
-  content: Buffer;
-  content_type: string;
-  headers: Record<string, string>;
-}> {
+function buildAttachments(tickets: TicketForEmail[]) {
   return tickets.map((ticket, index) => {
     const cidName = `qr-${index}`;
     const base64Data = extractBase64FromDataUrl(ticket.qrImageDataUrl);
 
     return {
-      filename: `${cidName}.png`,
-      content: Buffer.from(base64Data, 'base64'),
-      content_type: 'image/png',
-      headers: {
-        'Content-ID': `<${cidName}>`,
-        'Content-Disposition': 'inline',
-      },
+      content: base64Data,           // Raw base64 STRING (not Buffer!)
+      filename: `${cidName}.png`,    // Filename for the attachment
+      contentId: cidName,            // camelCase — matches cid:qr-0 in HTML
     };
   });
 }
@@ -267,6 +272,10 @@ export async function sendTicketEmail(params: SendTicketEmailParams): Promise<bo
     const attachments = buildAttachments(params.tickets);
 
     console.log(`[Email] Sending ${attachments.length} QR attachment(s) to ${params.to}`);
+    // Log attachment details to confirm data is present
+    attachments.forEach((att, i) => {
+      console.log(`[Email]   Attachment ${i}: filename=${att.filename}, contentId=${att.contentId}, base64 length=${att.content.length}`);
+    });
 
     const result = await resend.emails.send({
       from: EMAIL_FROM,
