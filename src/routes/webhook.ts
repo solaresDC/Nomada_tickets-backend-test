@@ -12,9 +12,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { verifyWebhookSignature } from '../plugins/stripe.js';
 import { orderStore } from '../services/supabaseOrderStore.js';
-import { generateQRToken } from '../services/qrService.js';
+import { generateQRToken, generateQRCodeDataUrl } from '../services/qrService.js';
 import { ticketStore } from '../services/supabaseTicketStore.js';
 import Stripe from 'stripe';
+import { sendTicketEmail } from '../services/emailService.js';
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // Add a content type parser for raw bodies
@@ -122,6 +123,8 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
   const metadata = paymentIntent.metadata;
   const femaleQty = parseInt(metadata.femaleQty || '0', 10);
   const maleQty = parseInt(metadata.maleQty || '0', 10);
+  const buyerEmail = metadata.email || '';
+  const language = metadata.language || 'en';
 
   console.log(`[Webhook]    Quantities → female: ${femaleQty}, male: ${maleQty}`);
 
@@ -146,14 +149,15 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
     status: 'valid',
     createdAt: new Date(),
     femaleQty,
-    maleQty
+    maleQty,
+    email: buyerEmail
   });
 
   console.log(`[Webhook]    Order saved ✓`);
   console.log(`[Webhook]    Legacy QR: ${qrToken.substring(0, 8)}...`);
 
   // Create individual tickets — one QR code per person
-  try {
+try {
     const tickets = await ticketStore.createTicketsForOrder(
       paymentIntentId,
       femaleQty,
@@ -164,15 +168,51 @@ async function handlePaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent)
       console.warn(`[Webhook] ⚠️  0 tickets created — see quantity warning above`);
     } else {
       console.log(`[Webhook]    Individual tickets created: ${tickets.length} ✓`);
-      tickets.forEach((t, i) => {
-        console.log(`[Webhook]      [${i + 1}] ${t.ticketType.padEnd(6)} → ${t.qrToken.substring(0, 8)}...`);
+      tickets.forEach((tk, i) => {
+        console.log(`[Webhook]      [${i + 1}] ${tk.ticketType.padEnd(6)} → ${tk.qrToken.substring(0, 8)}...`);
       });
+
+      // ── Send confirmation email ──────────────────────────
+      if (buyerEmail) {
+        console.log(`[Webhook]    Sending email to: ${buyerEmail}`);
+        try {
+          // Generate QR images for each ticket
+          const ticketsWithImages = await Promise.all(
+            tickets.map(async (tk) => ({
+              ticketType: tk.ticketType,
+              qrToken: tk.qrToken,
+              qrImageDataUrl: await generateQRCodeDataUrl(tk.qrToken),
+            }))
+          );
+
+          const emailSent = await sendTicketEmail({
+            to: buyerEmail,
+            eventName: 'Nómada',  // TODO: Make this dynamic per event
+            tickets: ticketsWithImages,
+            language: language,
+          });
+
+          if (emailSent) {
+            console.log(`[Webhook]    Email sent ✓`);
+          } else {
+            console.warn(`[Webhook]    Email skipped or failed (see logs above)`);
+          }
+        } catch (emailError) {
+          console.error('[Webhook] ❌ Email error (tickets still created):', emailError);
+        }
+      } else {
+        console.log(`[Webhook]    No email provided — skipping email delivery`);
+      }
+      // ─────────────────────────────────────────────────────
     }
   } catch (ticketError) {
     console.error('[Webhook] ❌ Failed to create tickets:', ticketError);
     // Don't fail the webhook — the order is still saved
     // Tickets can be manually created later if needed
   }
+
+
+
 
   console.log('='.repeat(60));
   console.log(`[Webhook] ✅ DONE — ${paymentIntentId}`);

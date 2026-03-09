@@ -16,7 +16,8 @@ import { calculatePricing, dollarsToCents } from '../services/pricingService.js'
 const createIntentSchema = z.object({
   femaleQty: z.number().int().min(0, 'Female quantity cannot be negative'),
   maleQty: z.number().int().min(0, 'Male quantity cannot be negative'),
-  language: z.enum(['en', 'es', 'pt-BR']).default('en')
+  language: z.enum(['en', 'es', 'pt-BR']).default('en'),
+  email: z.string().email('Invalid email address').optional()
 }).refine(
   // Custom validation: at least one ticket must be selected
   (data) => data.femaleQty > 0 || data.maleQty > 0,
@@ -65,7 +66,7 @@ export async function checkoutRoutes(app: FastifyInstance): Promise<void> {
         });
       }
       
-      const { femaleQty, maleQty, language } = validationResult.data;
+      const { femaleQty, maleQty, language, email } = validationResult.data;
       
       // Calculate pricing
       const pricing = calculatePricing(femaleQty, maleQty);
@@ -87,8 +88,10 @@ export async function checkoutRoutes(app: FastifyInstance): Promise<void> {
           maleQty: maleQty.toString(),
           subtotal: pricing.subtotal.toString(),
           fee: pricing.fee.toString(),
-          language: language
-        }
+          language: language,
+          email: email || ''
+        },
+        ...(email ? { receipt_email: email } : {})
       });
       
       console.log(`[Checkout] PaymentIntent created: ${paymentIntent.id}`);

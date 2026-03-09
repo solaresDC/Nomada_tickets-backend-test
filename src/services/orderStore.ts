@@ -16,6 +16,7 @@ export interface Order {
   createdAt: Date;
   femaleQty: number;
   maleQty: number;
+  email?: string;
 }
 
 /**

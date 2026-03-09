@@ -41,6 +41,7 @@ export class SupabaseOrderStore implements OrderStore {
         created_at: order.createdAt.toISOString(),
         female_qty: order.femaleQty,
         male_qty: order.maleQty,
+        email: order.email || null,
       });
 
     if (error) {
@@ -81,6 +82,7 @@ export class SupabaseOrderStore implements OrderStore {
       createdAt: new Date(data.created_at),
       femaleQty: data.female_qty,
       maleQty: data.male_qty,
+      email: data.email || undefined,
     };
   }
 
