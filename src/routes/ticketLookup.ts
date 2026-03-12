@@ -381,7 +381,7 @@ export async function ticketLookupRoutes(app: FastifyInstance): Promise<void> {
     // ── Step 2: Verify email + order reference ─────────────────
     const { data: order, error: orderError } = await supabase
       .from('orders')
-      .select('payment_intent_id, email, female_qty, male_qty')
+      .select('payment_intent_id, email, female_qty, male_qty, order_reference')
       .eq('order_reference', normalizedRef)
       .single();
 
@@ -438,8 +438,10 @@ export async function ticketLookupRoutes(app: FastifyInstance): Promise<void> {
         eventName: 'Nómada',
         tickets: ticketsWithImages,
         language,
-      });
+        orderReference: order.order_reference,
+    });
 
+    
       if (emailSent) {
         await logResendAttempt({
           email: normalizedEmail,
