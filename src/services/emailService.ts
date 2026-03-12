@@ -2,7 +2,13 @@
  * Email Service
  *
  * Sends ticket confirmation emails via Resend.
- * Called by the webhook after tickets are created.
+ * Called by the webhook after tickets are created,
+ * and also by the resend endpoint in ticketLookup.ts.
+ *
+ * CHANGES FROM ORIGINAL:
+ * - SendTicketEmailParams now accepts optional `orderReference`
+ * - Email template includes a styled "Your Order Reference" section
+ *   so customers can find their tickets using the lookup feature
  *
  * This service:
  * - Builds an HTML email with QR codes as CID-attached images (inline in body)
@@ -17,12 +23,6 @@
  *     contentId: "qr-0",            // camelCase — makes it inline CID
  *   }]
  *   HTML: <img src="cid:qr-0" />
- *
- * REGULAR ATTACHMENTS (no contentId = downloadable file):
- *   attachments: [{
- *     content: "<base64 string>",
- *     filename: "ticket-1-women.png",
- *   }]
  */
 
 import { Resend } from 'resend';
@@ -52,7 +52,8 @@ interface SendTicketEmailParams {
   to: string;
   eventName: string;
   tickets: TicketForEmail[];
-  language: string;          // 'en' | 'es' | 'pt-BR'
+  language: string;           // 'en' | 'es' | 'pt-BR'
+  orderReference?: string;    // NEW — e.g. "NMD-2847-XK9Q"
 }
 
 // ─── Translations ────────────────────────────────────────────
@@ -66,7 +67,9 @@ const emailStrings: Record<string, Record<string, string>> = {
     menTicket: 'Men Ticket',
     ticketLabel: 'Ticket',
     of: 'of',
-    footer: 'Save this email — you\'ll need it at the door.',
+    orderRefLabel: 'Your Order Reference',
+    orderRefHelper: 'Save this code — you can use it to look up your tickets anytime.',
+    footer: "Save this email — you'll need it at the door.",
     footerTip: 'Tip: Screenshot each QR code for quick access.',
     poweredBy: 'Powered by Nómada',
   },
@@ -78,6 +81,8 @@ const emailStrings: Record<string, Record<string, string>> = {
     menTicket: 'Boleto Hombre',
     ticketLabel: 'Boleto',
     of: 'de',
+    orderRefLabel: 'Tu Número de Orden',
+    orderRefHelper: 'Guarda este código — puedes usarlo para consultar tus boletos en cualquier momento.',
     footer: 'Guarda este correo — lo necesitarás en la puerta.',
     footerTip: 'Tip: Toma captura de cada código QR para acceso rápido.',
     poweredBy: 'Powered by Nómada',
@@ -90,6 +95,8 @@ const emailStrings: Record<string, Record<string, string>> = {
     menTicket: 'Ingresso Masculino',
     ticketLabel: 'Ingresso',
     of: 'de',
+    orderRefLabel: 'Seu Número de Pedido',
+    orderRefHelper: 'Salve este código — você pode usá-lo para consultar seus ingressos a qualquer momento.',
     footer: 'Salve este e-mail — você vai precisar na porta.',
     footerTip: 'Dica: Tire print de cada código QR para acesso rápido.',
     poweredBy: 'Powered by Nómada',
@@ -104,10 +111,11 @@ function t(lang: string, key: string): string {
 // ─── HTML Email Builder ──────────────────────────────────────
 
 function buildTicketEmailHtml(params: SendTicketEmailParams): string {
-  const { eventName, tickets, language } = params;
+  const { eventName, tickets, language, orderReference } = params;
   const lang = language || 'en';
   const total = tickets.length;
 
+  // Build ticket cards (one per QR code)
   const ticketCards = tickets.map((ticket, index) => {
     const typeLabel = ticket.ticketType === 'female'
       ? t(lang, 'womenTicket')
@@ -137,6 +145,21 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
     `;
   }).join('');
 
+  // Order reference section — only shown if reference was generated
+  const orderRefSection = orderReference ? `
+    <div style="background: #2a003b; border: 1px solid #6b21a8; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: center;">
+      <div style="font-size: 12px; color: #c084fc; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">
+        ${t(lang, 'orderRefLabel')}
+      </div>
+      <div style="font-size: 22px; font-weight: 700; color: #ffffff; letter-spacing: 0.15em; font-family: 'Courier New', Courier, monospace;">
+        ${orderReference}
+      </div>
+      <div style="font-size: 12px; color: #a0a0a0; margin-top: 8px;">
+        ${t(lang, 'orderRefHelper')}
+      </div>
+    </div>
+  ` : '';
+
   return `
 <!DOCTYPE html>
 <html lang="${lang}">
@@ -157,6 +180,9 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
         ${eventName}
       </p>
     </div>
+
+    <!-- Order Reference Box -->
+    ${orderRefSection}
 
     <!-- Instruction -->
     <p style="color: #d0d0d0; font-size: 15px; text-align: center; margin-bottom: 24px;">
@@ -190,25 +216,12 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 function extractBase64FromDataUrl(dataUrl: string): string {
   const marker = 'base64,';
   const markerIndex = dataUrl.indexOf(marker);
-  if (markerIndex === -1) {
-    return dataUrl;
-  }
+  if (markerIndex === -1) return dataUrl;
   return dataUrl.substring(markerIndex + marker.length);
 }
 
-// ─── Build ALL Attachments (CID inline + regular downloads) ──
+// ─── Build ALL Attachments ────────────────────────────────────
 
-/**
- * Creates TWO attachments per QR code:
- *
- * 1. CID inline (has contentId) → renders inside the HTML body
- *    - contentId: "qr-0"  ←  links to <img src="cid:qr-0">
- *
- * 2. Regular downloadable (NO contentId) → shows as attached PNG file
- *    - filename: "Ticket-1-Women Ticket.png"  (human-friendly)
- *
- * Modern clients show the QR inline. Old phones can open the attached PNGs.
- */
 function buildAttachments(tickets: TicketForEmail[], lang: string) {
   const attachments: Array<{
     content: string;

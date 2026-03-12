@@ -42,6 +42,7 @@ export class SupabaseOrderStore implements OrderStore {
         female_qty: order.femaleQty,
         male_qty: order.maleQty,
         email: order.email || null,
+        order_reference: order.orderReference || null, // NEW — save the NMD-XXXX-XXXX code
       });
 
     if (error) {
@@ -49,7 +50,7 @@ export class SupabaseOrderStore implements OrderStore {
       throw new Error(`Failed to save order: ${error.message}`);
     }
 
-    console.log(`[SupabaseOrderStore] Saved order for PaymentIntent: ${order.paymentIntentId}`);
+    console.log(`[SupabaseOrderStore] Saved order: ${order.paymentIntentId} (ref: ${order.orderReference || 'none'})`);
   }
 
   /**
