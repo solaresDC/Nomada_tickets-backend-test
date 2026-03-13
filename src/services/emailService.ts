@@ -70,8 +70,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefLabel: 'Your Order Reference',
     orderRefHelper: 'Save this code — you can use it to look up your tickets anytime.',
     footer: "Save this email — you'll need it at the door.",
-    footerTip: 'Tip: Screenshot each QR code for quick access.',
-    supportMsg: 'Need help? Contact us at nomada.events.to@gmail.com',
+    supportMsg: 'Need support? Contact us at nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
   es: {
@@ -85,8 +84,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefLabel: 'Tu Número de Orden',
     orderRefHelper: 'Guarda este código — puedes usarlo para consultar tus boletos en cualquier momento.',
     footer: 'Guarda este correo — lo necesitarás en la puerta.',
-    footerTip: 'Tip: Toma captura de cada código QR para acceso rápido.',
-    supportMsg: '¿Necesitas ayuda? Contáctanos en nomada.events.to@gmail.com',
+    supportMsg: '¿Necesitas soporte? Contáctanos en nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
   'pt-BR': {
@@ -100,8 +98,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefLabel: 'Seu Número de Pedido',
     orderRefHelper: 'Salve este código — você pode usá-lo para consultar seus ingressos a qualquer momento.',
     footer: 'Salve este e-mail — você vai precisar na porta.',
-    footerTip: 'Dica: Tire print de cada código QR para acesso rápido.',
-    supportMsg: 'Precisa de ajuda? Entre em contato: nomada.events.to@gmail.com',
+    supportMsg: 'Precisa de suporte? Entre em contato: nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
 };
@@ -197,11 +194,8 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
 
     <!-- Footer -->
     <div style="text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid #333;">
-      <p style="color: #999; font-size: 13px; margin: 0 0 8px 0;">
+      <p style="color: #999; font-size: 13px; margin: 0 0 16px 0;">
         ${t(lang, 'footer')}
-      </p>
-      <p style="color: #777; font-size: 12px; margin: 0 0 16px 0;">
-        ${t(lang, 'footerTip')}
       </p>
       <p style="color: #777; font-size: 12px; margin: 0 0 16px 0;">
         ${t(lang, 'supportMsg')}
