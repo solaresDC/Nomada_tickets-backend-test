@@ -71,6 +71,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefHelper: 'Save this code — you can use it to look up your tickets anytime.',
     footer: "Save this email — you'll need it at the door.",
     footerTip: 'Tip: Screenshot each QR code for quick access.',
+    supportMsg: 'Need help? Contact us at nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
   es: {
@@ -85,6 +86,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefHelper: 'Guarda este código — puedes usarlo para consultar tus boletos en cualquier momento.',
     footer: 'Guarda este correo — lo necesitarás en la puerta.',
     footerTip: 'Tip: Toma captura de cada código QR para acceso rápido.',
+    supportMsg: '¿Necesitas ayuda? Contáctanos en nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
   'pt-BR': {
@@ -99,6 +101,7 @@ const emailStrings: Record<string, Record<string, string>> = {
     orderRefHelper: 'Salve este código — você pode usá-lo para consultar seus ingressos a qualquer momento.',
     footer: 'Salve este e-mail — você vai precisar na porta.',
     footerTip: 'Dica: Tire print de cada código QR para acesso rápido.',
+    supportMsg: 'Precisa de ajuda? Entre em contato: nomada.events.to@gmail.com',
     poweredBy: 'Powered by Nómada',
   },
 };
@@ -199,6 +202,9 @@ function buildTicketEmailHtml(params: SendTicketEmailParams): string {
       </p>
       <p style="color: #777; font-size: 12px; margin: 0 0 16px 0;">
         ${t(lang, 'footerTip')}
+      </p>
+      <p style="color: #777; font-size: 12px; margin: 0 0 16px 0;">
+        ${t(lang, 'supportMsg')}
       </p>
       <p style="color: #555; font-size: 11px; margin: 0;">
         ${t(lang, 'poweredBy')}
