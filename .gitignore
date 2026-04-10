@@ -6,6 +6,12 @@
 node_modules/
 
 # ========================================
+# claude skills and code
+# ========================================
+# CRITICAL: ypou dont want to share thsi woth anyine
+.claude/
+
+# ========================================
 # Environment Variables (SECRETS!)
 # ========================================
 # CRITICAL: Never upload .env files - they contain API keys!
