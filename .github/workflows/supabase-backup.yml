@@ -51,7 +51,7 @@ jobs:
       # STEP 1: Check out the repository
       # -------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4  # ✅ Already Node.js 24 compatible
+        uses: actions/checkout@v5  # ✅ Node.js 24 compatible
 
       # -------------------------------------------------------
       # STEP 2: Install Supabase CLI
@@ -176,7 +176,7 @@ jobs:
       # -------------------------------------------------------
       - name: Upload backup artifact
         if: steps.backup.outputs.backup_success == 'true'
-        uses: actions/upload-artifact@v4  # ✅ Node.js 24 compatible (v4.6.0+)
+        uses: actions/upload-artifact@v5  # ✅ Node.js 24 compatible
         with:
           name: supabase-backup-${{ steps.backup.outputs.timestamp }}
           path: ${{ env.BACKUP_DIR }}
