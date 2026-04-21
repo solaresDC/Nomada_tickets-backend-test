@@ -45,13 +45,14 @@ jobs:
     env:
       MAX_RETRIES: 3
       BACKUP_DIR: ./backups
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # ✅ Forces all actions to use Node.js 24
 
     steps:
       # -------------------------------------------------------
       # STEP 1: Check out the repository
       # -------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v5  # ✅ Node.js 24 compatible
+        uses: actions/checkout@v5
 
       # -------------------------------------------------------
       # STEP 2: Install Supabase CLI
@@ -176,7 +177,7 @@ jobs:
       # -------------------------------------------------------
       - name: Upload backup artifact
         if: steps.backup.outputs.backup_success == 'true'
-        uses: actions/upload-artifact@v5  # ✅ Node.js 24 compatible
+        uses: actions/upload-artifact@v5
         with:
           name: supabase-backup-${{ steps.backup.outputs.timestamp }}
           path: ${{ env.BACKUP_DIR }}
@@ -206,7 +207,7 @@ jobs:
       # -------------------------------------------------------
       - name: Notify failure via GitHub Issue
         if: steps.backup.outputs.backup_success == 'false'
-        uses: actions/github-script@v7  # ✅ Already Node.js 24 compatible
+        uses: actions/github-script@v7
         with:
           script: |
             const timestamp = '${{ steps.backup.outputs.timestamp }}';
